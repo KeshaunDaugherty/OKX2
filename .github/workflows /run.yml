@@ -1,0 +1,70 @@
+name: Bot Cycle (Repo B - 4h ON / 4h OFF)
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # كل ساعة
+  workflow_dispatch:
+
+concurrency:
+  group: bot-cycle
+  cancel-in-progress: false
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 260
+
+    steps:
+      - name: Check UTC time (work / rest)
+        id: timecheck
+        run: |
+          HOUR=$(date -u +%H)
+          echo "Current UTC hour: $HOUR"
+
+          # ساعات الشغل للريبو التاني
+          WORK_HOURS=(5 6 7 8 13 14 15 16 21 22 23 0)
+
+          for h in "${WORK_HOURS[@]}"; do
+            if [ "$HOUR" -eq "$h" ]; then
+              echo "run=true" >> $GITHUB_OUTPUT
+              echo "✅ Working hour (Repo B)"
+              exit 0
+            fi
+          done
+
+          echo "run=false" >> $GITHUB_OUTPUT
+          echo "⛔ Rest hour — exiting"
+          exit 0
+
+      - name: Checkout public repo
+        if: steps.timecheck.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Checkout private repo
+        if: steps.timecheck.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: XXB4/RX
+          token: ${{ secrets.GH_TOKEN }}
+          path: private
+
+      - name: Set up Docker Buildx
+        if: steps.timecheck.outputs.run == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (with cache)
+        if: steps.timecheck.outputs.run == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./private
+          tags: telegram-bot:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run bot (4 hours)
+        if: steps.timecheck.outputs.run == 'true'
+        run: |
+          docker run --rm \
+            telegram-bot \
+            timeout 14400 python main.py
